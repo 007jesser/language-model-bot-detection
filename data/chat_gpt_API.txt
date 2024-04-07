@@ -1,0 +1,43 @@
+import openai
+import os
+import pandas as pd
+import time
+
+# Load your DataFrame
+df = pd.read_json("askreddit.jsonl", lines=True)
+# Adjust the file path as per your data location
+sampled_df = df.sample(n=10000, replace=False)
+
+# Load OpenAI client
+os.environ["OPENAI_API_KEY"] = "**************"
+client = openai.Client()
+
+# Define a function to prompt OpenAI API with a question and handle retries
+def prompt_openai_with_retry(client, question):
+    max_retries = 3
+    retries = 0
+    while retries < max_retries:
+        try:
+            response = client.completions.create(model="davinci-002", prompt=question, max_tokens=10)
+            # Adjust the max_tokens parameter as needed for shorter answers
+            return response.choices[0].text.strip()
+        except openai.RateLimitError as e:
+            wait_time = 2 ** retries  # Exponential backoff
+            print(f"Rate limit exceeded. Retrying in {wait_time} seconds...")
+            time.sleep(wait_time)
+            retries += 1
+    raise Exception("Max retries reached. Unable to complete request.")
+
+# Iterate over each row, prompt OpenAI with the question, and store the response
+responses = []
+for index, row in sampled_df.iterrows():
+    question = row["title"]  # Assuming "title" is the column containing the questions
+    response_text = prompt_openai_with_retry(client, question)
+    print(response_text)
+    responses.append({"title": question, "comment": row["comment"], "answer": response_text})
+
+# Create a new DataFrame from the responses
+responses_df = pd.DataFrame(responses)
+
+# Save the DataFrame to a CSV file
+responses_df.to_csv("responses.csv", index=False)
